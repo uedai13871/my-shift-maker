@@ -81,20 +81,17 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
                     obj_terms.append(shifts[(e_id, d, OFF)] * 150)
         except: continue
 
-    # B. 勤務形態をバラけさせる（ソフト制約）
+    # B. 全体的なバランス調整
     for e in all_employees:
-        for d in range(1, num_days):
-            # 同じ勤務が連続するとスコアが下がる（＝別の勤務を選びやすくする）
-            # 日勤の次は日勤以外、休みの次は休み以外を優先させる
-            obj_terms.append(shifts[(e, d, DAY)] + shifts[(e, d+1, DAY)] < 2) 
-            obj_terms.append(shifts[(e, d, OFF)] + shifts[(e, d+1, OFF)] < 2)
-
-    # C. スタッフ01-07の最低出勤確保と均等な割り振り
-    for e in range(7):
         for d in all_days:
-            # 働けば働くほど加点（ただし上限時間があるので無限には増えない）
-            obj_terms.append(shifts[(e, d, DAY)] * 20)
-            obj_terms.append(shifts[(e, d, N_START)] * 25) # 夜勤を少し優先して埋める
+            if e < 7: # スタッフ01-07
+                # 日勤と夜勤にバランスよく配点
+                obj_terms.append(shifts[(e, d, DAY)] * 10)
+                obj_terms.append(shifts[(e, d, N_START)] * 15)
+            elif 7 <= e <= 10: # スタッフ08-11
+                # 休みと日勤に配点して偏りを防ぐ
+                obj_terms.append(shifts[(e, d, OFF)] * 10)
+                obj_terms.append(shifts[(e, d, DAY)] * 5)
 
     model_ortools.Maximize(sum(obj_terms))
 
