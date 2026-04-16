@@ -93,6 +93,12 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
                 obj_terms.append(shifts[(e, d, OFF)] * 10)
                 obj_terms.append(shifts[(e, d, DAY)] * 5)
 
+    # C. セルフ修正 日勤→日勤、休み→休みは減点する
+    for e in range(7):
+        for d in range(1,num_days-1):
+            obj_terms.append((shifts[(e, d, DAY)] & shifts[(e, d+1, DAY)]) * -20)
+            obj_terms.append((shifts[(e, d, OFF)] & shifts[(e, d+1, OFF)]) * -20)        
+
     model_ortools.Maximize(sum(obj_terms))
 
     solver = cp_model.CpSolver()
