@@ -93,30 +93,36 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
                 obj_terms.append(shifts[(e, d, OFF)] * 10)
                 obj_terms.append(shifts[(e, d, DAY)] * 5)
 
-    # スタッフ01から07の連続抑制
+    # スタッフ01から07の連続抑制（高速版）
     for e in range(7):
         for d in range(1, num_days):
-            # --- 2日連続日勤のペナルティ ---
-            # 「2日連続日勤」を表す新しい「0か1」の変数を作る
-            is_consecutive_day = model_ortools.NewBoolVar(f'consecutive_day_e{e}d{d}')
+            # --- 2日連続日勤 ---
+            is_consecutive_day = model_ortools.NewBoolVar(f'c_day_e{e}d{d}')
+            v1_d = shifts[(e, d, DAY)]
+            v2_d = shifts[(e, d+1, DAY)]
             
-            # 制約: is_consecutive_day が 1 になるのは、d日目とd+1日目が両方 DAY の時だけ
-            # (厳密には「is_consecutive_day >= day1 + day2 - 1」という論理式)
-            model_ortools.AddMultiplicationEquality(is_consecutive_day, [shifts[(e, d, DAY)], shifts[(e, d+1, DAY)]])
+            # 高速な論理結合 (AND条件)
+            model_ortools.Add(is_consecutive_day <= v1_d)
+            model_ortools.Add(is_consecutive_day <= v2_d)
+            model_ortools.Add(is_consecutive_day >= v1_d + v2_d - 1)
             
-            # この変数が 1 になったら 10点減点
             obj_terms.append(is_consecutive_day * -5)
 
-            # --- 2日連続休みのペナルティ ---
-            is_consecutive_off = model_ortools.NewBoolVar(f'consecutive_off_e{e}d{d}')
-            model_ortools.AddMultiplicationEquality(is_consecutive_off, [shifts[(e, d, OFF)], shifts[(e, d+1, OFF)]])
+            # --- 2日連続休み ---
+            is_consecutive_off = model_ortools.NewBoolVar(f'c_off_e{e}d{d}')
+            v1_o = shifts[(e, d, OFF)]
+            v2_o = shifts[(e, d+1, OFF)]
+            
+            model_ortools.Add(is_consecutive_off <= v1_o)
+            model_ortools.Add(is_consecutive_off <= v2_o)
+            model_ortools.Add(is_consecutive_off >= v1_o + v2_o - 1)
             
             obj_terms.append(is_consecutive_off * -10)
 
     model_ortools.Maximize(sum(obj_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 120.0 # 複雑なので時間をかける
+    solver.parameters.max_time_in_seconds = 40.0 # 複雑なので時間をかける
     status = solver.Solve(model_ortools)
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
