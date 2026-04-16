@@ -105,18 +105,18 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
             model_ortools.AddMultiplicationEquality(is_consecutive_day, [shifts[(e, d, DAY)], shifts[(e, d+1, DAY)]])
             
             # この変数が 1 になったら 10点減点
-            obj_terms.append(is_consecutive_day * -10)
+            obj_terms.append(is_consecutive_day * -5)
 
             # --- 2日連続休みのペナルティ ---
             is_consecutive_off = model_ortools.NewBoolVar(f'consecutive_off_e{e}d{d}')
             model_ortools.AddMultiplicationEquality(is_consecutive_off, [shifts[(e, d, OFF)], shifts[(e, d+1, OFF)]])
             
-            obj_terms.append(is_consecutive_off * -5)
+            obj_terms.append(is_consecutive_off * -10)
 
     model_ortools.Maximize(sum(obj_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 60.0 # 複雑なので時間をかける
+    solver.parameters.max_time_in_seconds = 120.0 # 複雑なので時間をかける
     status = solver.Solve(model_ortools)
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
