@@ -9,7 +9,7 @@ from ortools.sat.python import cp_model
 if "GOOGLE_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
     model = genai.GenerativeModel(
-        model_name='models/gemini-2.5-flash',
+        model_name='models/gemini-3-flash',
         generation_config={"response_mime_type": "application/json"}
     )
 else:
