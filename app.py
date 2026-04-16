@@ -93,11 +93,25 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
                 obj_terms.append(shifts[(e, d, OFF)] * 10)
                 obj_terms.append(shifts[(e, d, DAY)] * 5)
 
-    # C. セルフ修正 日勤→日勤、休み→休みは減点する
+    # スタッフ01から07の連続抑制
     for e in range(7):
-        for d in range(1,num_days-1):
-            obj_terms.append((shifts[(e, d, DAY)] * shifts[(e, d+1, DAY)]) * -20)
-            obj_terms.append((shifts[(e, d, OFF)] * shifts[(e, d+1, OFF)]) * -20)        
+        for d in range(1, num_days):
+            # --- 2日連続日勤のペナルティ ---
+            # 「2日連続日勤」を表す新しい「0か1」の変数を作る
+            is_consecutive_day = model_ortools.NewBoolVar(f'consecutive_day_e{e}d{d}')
+            
+            # 制約: is_consecutive_day が 1 になるのは、d日目とd+1日目が両方 DAY の時だけ
+            # (厳密には「is_consecutive_day >= day1 + day2 - 1」という論理式)
+            model_ortools.AddMultiplicationEquality(is_consecutive_day, [shifts[(e, d, DAY)], shifts[(e, d+1, DAY)]])
+            
+            # この変数が 1 になったら 20点減点
+            obj_terms.append(is_consecutive_day * -20)
+
+            # --- 2日連続休みのペナルティ ---
+            is_consecutive_off = model_ortools.NewBoolVar(f'consecutive_off_e{e}d{d}')
+            model_ortools.AddMultiplicationEquality(is_consecutive_off, [shifts[(e, d, OFF)], shifts[(e, d+1, OFF)]])
+            
+            obj_terms.append(is_consecutive_off * -20)
 
     model_ortools.Maximize(sum(obj_terms))
 
