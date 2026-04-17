@@ -122,7 +122,7 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
     model_ortools.Maximize(sum(obj_terms))
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 40.0 # 複雑なので時間をかける
+    solver.parameters.max_time_in_seconds = 180.0 # 複雑なので時間をかける
     status = solver.Solve(model_ortools)
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
