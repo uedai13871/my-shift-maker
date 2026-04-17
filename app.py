@@ -96,17 +96,18 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
     # スタッフ01から07の連続抑制（高速版）
     for e in range(7):
         for d in range(1, num_days):
-            # --- 2日連続日勤 ---
-            is_consecutive_day = model_ortools.NewBoolVar(f'c_day_e{e}d{d}')
-            v1_d = shifts[(e, d, DAY)]
-            v2_d = shifts[(e, d+1, DAY)]
+            if e > 0:
+                # --- 2日連続日勤 ---
+                is_consecutive_day = model_ortools.NewBoolVar(f'c_day_e{e}d{d}')
+                v1_d = shifts[(e, d, DAY)]
+                v2_d = shifts[(e, d+1, DAY)]
             
-            # 高速な論理結合 (AND条件)
-            model_ortools.Add(is_consecutive_day <= v1_d)
-            model_ortools.Add(is_consecutive_day <= v2_d)
-            model_ortools.Add(is_consecutive_day >= v1_d + v2_d - 1)
+                # 高速な論理結合 (AND条件)
+                model_ortools.Add(is_consecutive_day <= v1_d)
+                model_ortools.Add(is_consecutive_day <= v2_d)
+                model_ortools.Add(is_consecutive_day >= v1_d + v2_d - 1)
             
-            obj_terms.append(is_consecutive_day * -5)
+                obj_terms.append(is_consecutive_day * -5)
 
             # --- 2日連続休み ---
             is_consecutive_off = model_ortools.NewBoolVar(f'c_off_e{e}d{d}')
