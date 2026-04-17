@@ -141,7 +141,7 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
 st.title("📅 AIシフトメーカー (均等配置版)")
 with st.expander("⚙️ 詳細設定", expanded=True):
     col1, col2, col3 = st.columns(3)
-    with col1: target_month = st.selectbox("作成月", range(1, 13), index=3)
+    with col1: target_month = st.selectbox("作成月", range(1, 13), index=4)
     with col2: max_h = st.number_input("上限時間(01-08)", value=177)
     with col3: s01_night = st.number_input("スタ01夜勤上限", value=4, min_value=0)
 
