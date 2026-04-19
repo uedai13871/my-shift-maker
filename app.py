@@ -22,7 +22,7 @@ def get_constraints(user_input, employees):
     response = model.generate_content(prompt)
     return json.loads(response.text)
 
-def create_shift(year, month, requests_data, max_hours, s01_night_limit):
+def create_shift(year, month, requests_data, max_hours, s01_night_limit, prev_n_end_ids):
     _, num_days = calendar.monthrange(year, month)
     all_days = range(1, num_days + 1)
     employees = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
@@ -37,6 +37,15 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
         for d in all_days:
             for s in STATES:
                 shifts[(e, d, s)] = model_ortools.NewBoolVar(f'e{e}d{d}s{s}')
+    
+    # --- 前月末からの引き継ぎ制約 ---
+    for e in all_employees:
+        if e in prev_n_end_ids:
+            # 指定された人は1日は「夜勤明け」で確定
+            model_ortools.Add(shifts[(e, 1, N_END)] == 1)
+        else:
+            # それ以外の人は1日は「夜勤明け」にはなれない
+            model_ortools.Add(shifts[(e, 1, N_END)] == 0)
 
     # --- 基本制約 ---
     for d in all_days:
@@ -108,6 +117,20 @@ with st.expander("⚙️ 詳細設定", expanded=True):
     with col3: s01_night = st.number_input("スタ01夜勤上限", value=4, min_value=0)
 
 user_query = st.text_area("休み希望を入力してください")
+
+# --- UI: 前月末からの夜勤引き継ぎ設定 ---
+st.subheader("🌙 前月末からの夜勤引き継ぎ")
+emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
+
+col_prev1, col_prev2 = st.columns(2)
+with col_prev1:
+    prev_n_end1 = st.selectbox("1日に夜勤明けになる人①", emp_names[:7], index=0) # デフォルト スタッフ01
+with col_prev2:
+    prev_n_end2 = st.selectbox("1日に夜勤明けになる人②", emp_names[:7], index=1) # デフォルト スタッフ02
+
+# 名前からID(0-11)に変換
+prev_n_end_ids = [emp_names.index(prev_n_end1), emp_names.index(prev_n_end2)]
+
 
 if st.button("✨ シフトを作成"):
     emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
