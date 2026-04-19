@@ -137,7 +137,7 @@ if st.button("✨ シフトを作成"):
     with st.spinner("勤務をバラけさせながら計算中..."):
         try:
             data = get_constraints(user_query, emp_names)
-            df = create_shift(2026, target_month, data, max_h, s01_night)
+            df = create_shift(2026, target_month, data, max_h, s01_night, prev_n_end_ids)
             if df is not None:
                 st.success("完成しました！")
                 st.dataframe(df, use_container_width=True)
