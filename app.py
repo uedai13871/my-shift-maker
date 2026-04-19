@@ -1,152 +1,137 @@
 import streamlit as st
 import pandas as pd
 import calendar
-import json
-import google.generativeai as genai
 from ortools.sat.python import cp_model
 
-# --- API設定 ---
-if "GOOGLE_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-    model = genai.GenerativeModel(
-        model_name='models/gemini-3-flash-preview',
-        generation_config={"response_mime_type": "application/json"}
-    )
-else:
-    st.error("APIキーが設定されていません。")
-    st.stop()
+# --- 初期設定 ---
+st.set_page_config(page_title="AIシフトメーカー", layout="wide")
+st.title("📅 インタラクティブ・シフトメーカー")
 
-def get_constraints(user_input, employees):
-    mapping_str = "\n".join([f"ID {i}: {name}" for i, name in enumerate(employees)])
-    prompt = f"スタッフの休み希望を抽出しJSONで出力せよ。対応表:\n{mapping_str}\n入力:「{user_input}」"
-    response = model.generate_content(prompt)
-    return json.loads(response.text)
-
-def create_shift(year, month, requests_data, max_hours, s01_night_limit, prev_n_end_ids):
-    _, num_days = calendar.monthrange(year, month)
-    all_days = range(1, num_days + 1)
-    employees = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
-    all_employees = range(len(employees))
+# --- 設定サイドバー ---
+with st.sidebar:
+    st.header("⚙️ 基本設定")
+    year = 2026
+    month = st.selectbox("作成月", range(1, 13), index=3)
+    max_h = st.number_input("上限時間(01-08)", value=177)
+    s01_night_limit = st.number_input("スタ01夜勤上限", value=4)
     
+    # 前月末からの引き継ぎ
+    st.subheader("🌙 夜勤明け引き継ぎ (1日)")
+    emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
+    prev_n_end = st.multiselect("1日に夜勤明けになる2名を選択", emp_names, default=emp_names[:2])
+
+# --- 1. 入力フォーム（データエディタ）の作成 ---
+st.subheader("📝 勤務希望・確定事項の入力")
+st.info("確定している勤務を選択してください。空欄の部分はAIが自動で埋めます。")
+
+_, num_days = calendar.monthrange(year, month)
+days = [f"{d}({['月','火','水','木','金','土','日'][calendar.weekday(year, month, d)]})" for d in range(1, num_days + 1)]
+
+# 初期データの作成（すべて空欄）
+init_df = pd.DataFrame(
+    "",
+    index=days,
+    columns=emp_names
+)
+
+# データエディタを表示
+edited_df = st.data_editor(
+    init_df,
+    use_container_width=True,
+    column_config={
+        col: st.column_config.SelectboxColumn(
+            options=["", "日勤", "夜勤入", "休み"],
+            width="small"
+        ) for col in emp_names
+    }
+)
+
+# --- 2. シフト計算ロジック ---
+def solve_shift():
+    model = cp_model.CpModel()
+    all_days = range(1, num_days + 1)
+    all_emps = range(len(emp_names))
     OFF, DAY, N_START, N_END = 0, 1, 2, 3
     STATES = [OFF, DAY, N_START, N_END]
 
-    model_ortools = cp_model.CpModel()
     shifts = {}
-    for e in all_employees:
+    for e in all_emps:
         for d in all_days:
             for s in STATES:
-                shifts[(e, d, s)] = model_ortools.NewBoolVar(f'e{e}d{d}s{s}')
-    
-    # --- 前月末からの引き継ぎ制約 ---
-    for e in all_employees:
-        if e in prev_n_end_ids:
-            # 指定された人は1日は「夜勤明け」で確定
-            model_ortools.Add(shifts[(e, 1, N_END)] == 1)
-        else:
-            # それ以外の人は1日は「夜勤明け」にはなれない
-            model_ortools.Add(shifts[(e, 1, N_END)] == 0)
+                shifts[(e, d, s)] = model.NewBoolVar(f'e{e}d{d}s{s}')
 
     # --- 基本制約 ---
     for d in all_days:
-        for e in all_employees:
-            model_ortools.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
-        model_ortools.Add(sum(shifts[(e, d, DAY)] for e in all_employees) == 4)
-        model_ortools.Add(sum(shifts[(e, d, N_START)] for e in all_employees) == 2)
-        model_ortools.Add(sum(shifts[(e, d, N_END)] for e in all_employees) == 2)
+        for e in all_emps:
+            model.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
+        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) == 4)
+        model.Add(sum(shifts[(e, d, N_START)] for e in all_emps) == 2)
+        model.Add(sum(shifts[(e, d, N_END)] for e in all_emps) == 2)
 
-    # 1. 勤務時間制限 (01-08)
-    for e in range(8): 
-        hrs = []
-        for d in all_days:
-            hrs.append(shifts[(e, d, DAY)] * 8 + shifts[(e, d, N_START)] * 6 + shifts[(e, d, N_END)] * 8)
-        model_ortools.Add(sum(hrs) <= max_hours)
+    # UIでの入力内容をハード制約として追加
+    for e_idx, e_name in enumerate(emp_names):
+        for d_idx, d_label in enumerate(days):
+            val = edited_df.iloc[d_idx, e_idx]
+            day_num = d_idx + 1
+            if val == "日勤": model.Add(shifts[(e_idx, day_num, DAY)] == 1)
+            if val == "夜勤入": model.Add(shifts[(e_idx, day_num, N_START)] == 1)
+            if val == "休み": model.Add(shifts[(e_idx, day_num, OFF)] == 1)
 
-    # 2. 連勤制限 (最大6日) & 3. 夜勤制限
-    for e in all_employees:
+    # 1日の夜勤明け引き継ぎ
+    for e_idx, e_name in enumerate(emp_names):
+        if e_name in prev_n_end:
+            model.Add(shifts[(e_idx, 1, N_END)] == 1)
+        else:
+            model.Add(shifts[(e_idx, 1, N_END)] == 0)
+
+    # 共通ルール（夜勤明けの翌日、連勤制限、スタッフ別制限など）
+    for e in all_emps:
+        for d in range(1, num_days):
+            model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
+            model.Add(shifts[(e, d, N_END)] + shifts[(e, d+1, DAY)] <= 1)
         for d in range(1, num_days - 5):
             model_ortools.Add(sum(shifts[(e, d + i, OFF)] for i in range(7)) >= 1)
-        for d in range(1, num_days):
-            model_ortools.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
-            model_ortools.Add(shifts[(e, d, N_END)] + shifts[(e, d+1, DAY)] <= 1)
 
-    # 4. 夜勤回数とスタッフ12の固定
-    model_ortools.Add(sum(shifts[(0, d, N_START)] for d in all_days) <= s01_night_limit)
-    for e in range(7, 12):
-        for d in all_days:
-            model_ortools.Add(shifts[(e, d, N_START)] == 0)
-    model_ortools.Add(sum(shifts[(11, d, s)] for d in all_days for s in [DAY, N_START, N_END]) == 8)
-
-    # --- 目的関数（ここが「均等ばらけ」のキモ） ---
+    # --- 目的関数（等間隔・バランス） ---
     obj_terms = []
-    
-    # A. 休み希望（最優先）
-    reqs = requests_data.get("requests", {}) if isinstance(requests_data, dict) else {}
-    for e_id_str, dates in reqs.items():
-        try:
-            e_id = int(e_id_str)
-            for d in dates:
-                if 1 <= d <= num_days:
-                    obj_terms.append(shifts[(e_id, d, OFF)] * 150)
-        except: continue
+    for e in range(11):
+        for d in all_days:
+            obj_terms.append(shifts[(e, d, DAY)] * 10)
+            if e < 7: obj_terms.append(shifts[(e, d, N_START)] * 15)
+            
+    # 高速な等間隔スコアリング（4日おき）
+    for e in all_emps:
+        for d in range(1, num_days - 4):
+            is_sep = model.NewBoolVar(f'sep_e{e}d{d}')
+            model.Add(is_sep <= shifts[(e, d, OFF)])
+            model.Add(is_sep <= shifts[(e, d+4, OFF)])
+            model.Add(is_sep >= shifts[(e, d, OFF)] + shifts[(e, d+4, OFF)] - 1)
+            obj_terms.append(is_sep * 30)
 
-    model_ortools.Maximize(sum(obj_terms))
-
+    model.Maximize(sum(obj_terms))
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 180.0 # 複雑なので時間をかける
-    status = solver.Solve(model_ortools)
+    solver.parameters.max_time_in_seconds = 120.0
+    status = solver.Solve(model)
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
         res = []
         for d in all_days:
-            w = ["月","火","水","木","金","土","日"][calendar.weekday(year, month, d)]
-            row = {"日付": f"{d}({w})"}
-            for e in all_employees:
+            row = {"日付": days[d-1]}
+            for e in all_emps:
                 for s, name in {DAY:"日勤", N_START:"夜勤入", N_END:"夜勤明", OFF:"休み"}.items():
-                    if solver.Value(shifts[(e, d, s)]): row[employees[e]] = name
+                    if solver.Value(shifts[(e, d, s)]): row[emp_names[e]] = name
             res.append(row)
         return pd.DataFrame(res).set_index("日付")
     return None
 
-# --- UI ---
-st.title("📅 AIシフトメーカー (均等配置版)")
-with st.expander("⚙️ 詳細設定", expanded=True):
-    col1, col2, col3 = st.columns(3)
-    with col1: target_month = st.selectbox("作成月", range(1, 13), index=4)
-    with col2: max_h = st.number_input("上限時間(01-08)", value=177)
-    with col3: s01_night = st.number_input("スタ01夜勤上限", value=4, min_value=0)
-
-user_query = st.text_area("休み希望を入力してください")
-
-# --- UI: 前月末からの夜勤引き継ぎ設定 ---
-st.subheader("🌙 前月末からの夜勤引き継ぎ")
-emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
-
-col_prev1, col_prev2 = st.columns(2)
-with col_prev1:
-    prev_n_end1 = st.selectbox("1日に夜勤明けになる人①", emp_names[:7], index=0) # デフォルト スタッフ01
-with col_prev2:
-    prev_n_end2 = st.selectbox("1日に夜勤明けになる人②", emp_names[:7], index=1) # デフォルト スタッフ02
-
-# 名前からID(0-11)に変換
-prev_n_end_ids = [emp_names.index(prev_n_end1), emp_names.index(prev_n_end2)]
-
-
-if st.button("✨ シフトを作成"):
-    emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
-    with st.spinner("勤務をバラけさせながら計算中..."):
-        try:
-            data = get_constraints(user_query, emp_names)
-            df = create_shift(2026, target_month, data, max_h, s01_night, prev_n_end_ids)
-            if df is not None:
-                st.success("完成しました！")
-                st.dataframe(df, use_container_width=True)
-                
-                # 集計表示
-                st.subheader("📊 勤務状況の確認")
-                counts = df.apply(pd.Series.value_counts).fillna(0).astype(int)
-                st.write(counts)
-            else:
-                st.error("解が見つかりませんでした。条件を少し緩めてください。")
-        except Exception as e:
-            st.error(f"エラー: {e}")
+if st.button("🚀 AIに空欄を埋めてもらう"):
+    with st.spinner("最適な組み合わせを計算中..."):
+        result_df = solve_shift()
+        if result_df is not None:
+            st.success("シフトが完成しました！")
+            st.dataframe(result_df, use_container_width=True)
+            # 集計
+            st.subheader("📊 勤務集計")
+            st.table(result_df.apply(pd.Series.value_counts).fillna(0).astype(int))
+        else:
+            st.error("解が見つかりませんでした。入力した確定事項に無理がないか確認してください。")
