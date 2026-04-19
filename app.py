@@ -81,45 +81,6 @@ def create_shift(year, month, requests_data, max_hours, s01_night_limit):
                     obj_terms.append(shifts[(e_id, d, OFF)] * 150)
         except: continue
 
-    # B. 全体的なバランス調整
-    for e in all_employees:
-        for d in all_days:
-            if e < 7: # スタッフ01-07
-                # 日勤と夜勤にバランスよく配点
-                obj_terms.append(shifts[(e, d, DAY)] * 10)
-                obj_terms.append(shifts[(e, d, N_START)] * 15)
-            elif 7 <= e <= 10: # スタッフ08-11
-                # 休みと日勤に配点して偏りを防ぐ
-                obj_terms.append(shifts[(e, d, OFF)] * 10)
-                obj_terms.append(shifts[(e, d, DAY)] * 5)
-
-    # スタッフ01から07の連続抑制（高速版）
-    for e in range(7):
-        for d in range(1, num_days):
-            if e > 0:
-                # --- 2日連続日勤 ---
-                is_consecutive_day = model_ortools.NewBoolVar(f'c_day_e{e}d{d}')
-                v1_d = shifts[(e, d, DAY)]
-                v2_d = shifts[(e, d+1, DAY)]
-            
-                # 高速な論理結合 (AND条件)
-                model_ortools.Add(is_consecutive_day <= v1_d)
-                model_ortools.Add(is_consecutive_day <= v2_d)
-                model_ortools.Add(is_consecutive_day >= v1_d + v2_d - 1)
-            
-                obj_terms.append(is_consecutive_day * -5)
-
-            # --- 2日連続休み ---
-            is_consecutive_off = model_ortools.NewBoolVar(f'c_off_e{e}d{d}')
-            v1_o = shifts[(e, d, OFF)]
-            v2_o = shifts[(e, d+1, OFF)]
-            
-            model_ortools.Add(is_consecutive_off <= v1_o)
-            model_ortools.Add(is_consecutive_off <= v2_o)
-            model_ortools.Add(is_consecutive_off >= v1_o + v2_o - 1)
-            
-            obj_terms.append(is_consecutive_off * -10)
-
     model_ortools.Maximize(sum(obj_terms))
 
     solver = cp_model.CpSolver()
