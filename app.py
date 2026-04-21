@@ -84,7 +84,7 @@ def solve_shift():
     for d in all_days:
         for e in all_emps:
             model.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
-        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) >= 4)
+        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) >= 3)
         model.Add(sum(shifts[(e, d, N_START)] for e in all_emps) == 2)
         model.Add(sum(shifts[(e, d, N_END)] for e in all_emps) == 2)
 
@@ -117,6 +117,13 @@ def solve_shift():
     # 目的関数
     obj_terms = []
     for e in all_emps:
+        for d in range(1, num_days+1):
+            obj_terms.append(shifts[(e, d, OFF)] * -1)
+            obj_terms.append(shifts[(e, d, DAY)] * 1)
+
+    """
+            
+    for e in all_emps:
         work_vars = [shifts[(e, d, s)] for d in all_days for s in [DAY, N_START, N_END]]
         actual_work_days = sum(work_vars)
         under_15 = model.NewIntVar(0, 15, f'under15_e{e}')
@@ -131,6 +138,7 @@ def solve_shift():
             model.Add(is_sep <= shifts[(e, d+4, OFF)])
             model.Add(is_sep >= shifts[(e, d, OFF)] + shifts[(e, d+4, OFF)] - 1)
             obj_terms.append(is_sep * 30)
+    """
 
     model.Maximize(sum(obj_terms))
     solver = cp_model.CpSolver()
