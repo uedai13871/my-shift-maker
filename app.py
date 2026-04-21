@@ -110,10 +110,6 @@ def solve_shift():
         for d in range(1, num_days+1):
             obj_terms.append(shifts[(e, d, DAY)] * 5)
 
-    for e in all_emps:
-        for d in range(1, num_days-2):
-            obj_terms.append(shifts[(e, d, N_END)] * (shifts[(e, d+1, OFF)] + shifts[(e, d+2, OFF)] + shifts[(e, d+3, OFF)]) * 10)
-
     model.Maximize(sum(obj_terms))
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = 180.0
