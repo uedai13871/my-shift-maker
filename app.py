@@ -106,8 +106,8 @@ def solve_shift():
             model.Add(shifts[(e, d, N_END)] == 0)
 
     obj_terms = []
-    for e in all_emps:
-        for d in range(1, num_days+1):
+    # for e in all_emps:
+        # for d in range(1, num_days+1):
             # obj_terms.append(shifts[(e, d, OFF)] * -1)
             # obj_terms.append(shifts[(e, d, DAY)] * 40)
 
