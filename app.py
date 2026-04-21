@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import calendar
 from ortools.sat.python import cp_model
+import io
 
 # --- 初期設定 ---
 st.set_page_config(page_title="AIシフトメーカー", layout="wide")
@@ -11,31 +12,42 @@ st.title("📅 インタラクティブ・シフトメーカー")
 with st.sidebar:
     st.header("⚙️ 基本設定")
     year = 2026
-    month = st.selectbox("作成月", range(1, 13), index=3)  # デフォルト4月
+    month = st.selectbox("作成月", range(1, 13), index=3)
     max_h = st.number_input("上限時間(全スタッフ共通)", value=177)
     s01_night_limit = st.number_input("スタ01夜勤上限", value=4)
-    st.info("※入力内容はアプリ内での操作中、保持されます。")
+    
+    st.divider()
+    st.header("📂 データ連携")
+    # CSVアップロード機能
+    uploaded_file = st.file_uploader("CSVファイルを読み込む", type="csv")
 
-# --- 1. 入力データの保持ロジック (Session State) ---
+# --- 1. 入力データの準備 ---
 emp_names = [f"スタッフ{str(i+1).zfill(2)}" for i in range(12)]
 _, num_days = calendar.monthrange(year, month)
 day_cols = [f"{d}" for d in range(1, num_days + 1)]
 
-# セッション状態で入力を管理
-state_key = f"df_input_{year}_{month}"
-if state_key not in st.session_state:
-    # 初めてその月を表示する場合、空の表を作成
-    st.session_state[state_key] = pd.DataFrame("", index=emp_names, columns=day_cols)
+# デフォルトの空表
+default_df = pd.DataFrame("", index=emp_names, columns=day_cols)
+
+# CSVがアップロードされた場合はその内容を使用、そうでなければデフォルト
+if uploaded_file is not None:
+    try:
+        input_df = pd.read_csv(uploaded_file, index_col=0)
+        # 列名が現在の日数と一致するか、不足分を補完するなどの簡易チェック
+        input_df = input_df.reindex(index=emp_names, columns=day_cols).fillna("")
+        st.sidebar.success("CSVを読み込みました")
+    except Exception as e:
+        st.sidebar.error(f"読み込みエラー: {e}")
+        input_df = default_df
+else:
+    input_df = default_df
 
 # --- 2. 入力フォーム（データエディタ） ---
 st.subheader("📝 勤務希望・確定事項の入力")
-st.markdown("空欄はAIが自動で埋めます。入力内容は自動で一時保存されます。")
 
-# データエディタを表示。編集されるたびに session_state を更新
 edited_df = st.data_editor(
-    st.session_state[state_key],
+    input_df,
     use_container_width=True,
-    key=f"editor_{state_key}", # keyを指定することで状態を紐付け
     column_config={
         col: st.column_config.SelectboxColumn(
             options=["", "日勤", "夜勤入", "夜勤明け", "休み"],
@@ -44,8 +56,15 @@ edited_df = st.data_editor(
     }
 )
 
-# 編集された内容をセッション状態に書き戻す
-st.session_state[state_key] = edited_df
+# 入力内容をCSVとしてダウンロードする機能
+csv_buffer = io.StringIO()
+edited_df.to_csv(csv_buffer)
+st.download_button(
+    label="📥 現在の入力内容をCSVで保存する",
+    data=csv_buffer.getvalue(),
+    file_name=f"shift_input_{year}_{month}.csv",
+    mime="text/csv",
+)
 
 # --- 3. シフト計算ロジック ---
 def solve_shift():
@@ -61,15 +80,15 @@ def solve_shift():
             for s in STATES:
                 shifts[(e, d, s)] = model.NewBoolVar(f'e{e}d{d}s{s}')
 
-    # 基本制約（人数固定）
+    # 基本制約
     for d in all_days:
         for e in all_emps:
             model.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
-        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) >= 3)
+        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) == 4)
         model.Add(sum(shifts[(e, d, N_START)] for e in all_emps) == 2)
         model.Add(sum(shifts[(e, d, N_END)] for e in all_emps) == 2)
 
-    # ユーザー入力内容を反映
+    # ユーザー入力反映
     for e_idx, e_name in enumerate(emp_names):
         for d_idx in range(num_days):
             val = edited_df.iloc[e_idx, d_idx]
@@ -90,7 +109,6 @@ def solve_shift():
         model.Add(sum(hrs) <= max_h)
     
     model.Add(sum(shifts[(0, d, N_START)] for d in all_days) <= s01_night_limit)
-    
     for e in range(7, 12):
         for d in all_days:
             model.Add(shifts[(e, d, N_START)] == 0)
@@ -98,7 +116,6 @@ def solve_shift():
 
     # 目的関数
     obj_terms = []
-    # 15日目標
     for e in all_emps:
         work_vars = [shifts[(e, d, s)] for d in all_days for s in [DAY, N_START, N_END]]
         actual_work_days = sum(work_vars)
@@ -107,7 +124,6 @@ def solve_shift():
         obj_terms.append(under_15 * 100)
         obj_terms.append(actual_work_days * 10)
 
-    # 休み等間隔
     for e in all_emps:
         for d in range(1, num_days - 4):
             is_sep = model.NewBoolVar(f'sep_e{e}d{d}')
@@ -135,15 +151,24 @@ def solve_shift():
 
 # --- 4. 出力表示 ---
 if st.button("🚀 シフトを作成する"):
-    with st.spinner("AIが最適な組み合わせを計算中..."):
+    with st.spinner("AIが計算中..."):
         result_df = solve_shift()
         if result_df is not None:
             st.success("シフトが完成しました！")
-            # 背景色なしの標準表示
             st.dataframe(result_df, use_container_width=True)
+            
+            # 結果をCSVでダウンロード
+            res_csv = io.StringIO()
+            result_df.to_csv(res_csv)
+            st.download_button(
+                label="📊 完成したシフトをCSVで書き出す",
+                data=res_csv.getvalue(),
+                file_name=f"shift_result_{year}_{month}.csv",
+                mime="text/csv",
+            )
             
             st.subheader("📊 最終集計")
             counts = result_df.T.apply(pd.Series.value_counts).fillna(0).astype(int)
             st.table(counts)
         else:
-            st.error("解が見つかりませんでした。入力内容を確認してください。")
+            st.error("解が見つかりませんでした。")
