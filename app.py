@@ -12,7 +12,7 @@ st.title("📅 インタラクティブ・シフトメーカー")
 with st.sidebar:
     st.header("⚙️ 基本設定")
     year = 2026
-    month = st.selectbox("作成月", range(1, 13), index=3)
+    month = st.selectbox("作成月", range(1, 13), index=4)
     max_h = st.number_input("上限時間(全スタッフ共通)", value=177)
     s01_night_limit = st.number_input("スタ01夜勤上限", value=4)
     
@@ -101,10 +101,10 @@ def solve_shift():
     # 共通ルール
     for e in all_emps:
         for d in range(1, num_days):
-            model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
-            model.Add(shifts[(e, d, N_END)] + shifts[(e, d+1, DAY)] <= 1)
+            model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)]) # 入の後は必ず明
+            # model.Add(shifts[(e, d, N_END)] + shifts[(e, d+1, DAY)] <= 1) # 明の後の日勤を禁止
         for d in range(1, num_days - 5):
-            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(7)) >= 1)
+            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(7)) >= 1) # 7連勤以上禁止
         hrs = [shifts[(e, d, DAY)]*8 + shifts[(e, d, N_START)]*6 + shifts[(e, d, N_END)]*8 for d in all_days]
         model.Add(sum(hrs) <= max_h)
     
