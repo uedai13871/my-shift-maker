@@ -123,7 +123,7 @@ def solve_shift():
         
         model.Add(sum(hrs) <= staff_max_h)
     
-    model.Add(sum(shifts[(0, d, N_START)] for d in all_days) <= s01_night_limit)
+    model.Add(sum(shifts[(0, d, N_START)] for d in all_days) == s01_night_limit)
     for e in range(7, 12):
         for d in all_days:
             model.Add(shifts[(e, d, N_START)] == 0)
@@ -132,7 +132,6 @@ def solve_shift():
     obj_terms = []
     for e in all_emps:
         for d in range(1, num_days+1):
-            obj_terms.append(shifts[(e, d, N_START)] * 10)
             obj_terms.append(shifts[(e, d, DAY)] * 5)
 
     model.Maximize(sum(obj_terms))
