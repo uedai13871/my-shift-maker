@@ -132,6 +132,7 @@ def solve_shift():
     obj_terms = []
     for e in all_emps:
         for d in range(1, num_days+1):
+            obj_terms.append(shifts[(e, d, N_START)] * 10)
             obj_terms.append(shifts[(e, d, DAY)] * 5)
 
     model.Maximize(sum(obj_terms))
