@@ -109,8 +109,8 @@ def solve_shift():
     for e in all_emps:
         for d in range(1, num_days):
             model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
-        for d in range(1, num_days - 5):
-            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(7)) >= 1)
+        for d in range(1, num_days - 4):
+            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(6)) >= 1) # 6連勤以上禁止
         
         # --- 各スタッフの時間上限を設定 ---
         hrs = [shifts[(e, d, DAY)]*8 + shifts[(e, d, N_START)]*6 + shifts[(e, d, N_END)]*8 for d in all_days]
