@@ -109,7 +109,7 @@ def solve_shift():
     for e in all_emps:
         for d in range(1, num_days+1):
             obj_terms.append(shifts[(e, d, OFF)] * -1)
-            obj_terms.append(shifts[(e, d, DAY)] * 1)
+            obj_terms.append(shifts[(e, d, DAY)] * 40)
 
     model.Maximize(sum(obj_terms))
     solver = cp_model.CpSolver()
