@@ -13,7 +13,22 @@ with st.sidebar:
     st.header("⚙️ 基本設定")
     year = 2026
     month = st.selectbox("作成月", range(1, 13), index=4)
-    max_h = st.number_input("上限時間(全スタッフ共通)", value=177)
+    
+    st.divider()
+    st.subheader("⏳ 勤務時間上限（月間）")
+    max_h_common = st.number_input("全スタッフ共通の上限(h)", value=177)
+    
+    # 特定スタッフ個別の時間設定
+    st.write("▼ 個別設定（時短など）")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        max_h_s01 = st.number_input("スタ01", value=max_h_common)
+    with col2:
+        max_h_s02 = st.number_input("スタ02", value=max_h_common)
+    with col3:
+        max_h_s08 = st.number_input("スタ08", value=max_h_common)
+    
+    st.divider()
     s01_night_limit = st.number_input("スタ01夜勤上限", value=4)
     
     st.divider()
@@ -96,8 +111,17 @@ def solve_shift():
             model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
         for d in range(1, num_days - 5):
             model.Add(sum(shifts[(e, d + i, OFF)] for i in range(7)) >= 1)
+        
+        # --- 各スタッフの時間上限を設定 ---
         hrs = [shifts[(e, d, DAY)]*8 + shifts[(e, d, N_START)]*6 + shifts[(e, d, N_END)]*8 for d in all_days]
-        model.Add(sum(hrs) <= max_h)
+        
+        # スタッフごとに上限値を振り分ける
+        staff_max_h = max_h_common
+        if e == 0: staff_max_h = max_h_s01
+        elif e == 1: staff_max_h = max_h_s02
+        elif e == 7: staff_max_h = max_h_s08
+        
+        model.Add(sum(hrs) <= staff_max_h)
     
     model.Add(sum(shifts[(0, d, N_START)] for d in all_days) <= s01_night_limit)
     for e in range(7, 12):
@@ -135,16 +159,12 @@ if st.button("🚀 シフトを作成する"):
             st.success("シフトが完成しました！")
             st.dataframe(result_df, use_container_width=True)
             
-            # --- 新機能：日毎の日勤人数を表示 ---
             st.subheader("☀️ 日毎の日勤人数")
-            # 「日勤」という文字列をカウントするために転置して集計
             daily_day_counts = (result_df == "日勤").sum()
-            # 見やすいようにデータフレーム化して表示
             daily_summary = pd.DataFrame(daily_day_counts).T
             daily_summary.index = ["日勤合計"]
             st.dataframe(daily_summary, use_container_width=True)
 
-            # 結果をCSVでダウンロード
             res_csv = io.StringIO()
             result_df.to_csv(res_csv)
             st.download_button(
