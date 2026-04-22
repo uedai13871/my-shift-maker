@@ -16,17 +16,8 @@ with st.sidebar:
     
     st.divider()
     st.subheader("⏳ 勤務時間上限（月間）")
+    # 個別設定を削除し、共通設定のみに戻しました
     max_h_common = st.number_input("全スタッフ共通の上限(h)", value=177)
-    
-    # 特定スタッフ個別の時間設定
-    st.write("▼ 個別設定（時短など）")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        max_h_s01 = st.number_input("スタ01", value=max_h_common)
-    with col2:
-        max_h_s02 = st.number_input("スタ02", value=max_h_common)
-    with col3:
-        max_h_s08 = st.number_input("スタ08", value=max_h_common)
     
     st.divider()
     s01_night_limit = st.number_input("スタ01夜勤上限", value=4)
@@ -61,7 +52,7 @@ edited_df = st.data_editor(
     use_container_width=True,
     column_config={
         col: st.column_config.SelectboxColumn(
-            options=["", "日勤", "夜勤入", "夜勤明け", "休み"],
+            options=["", "日勤", "夜勤入", "夜勤明け", "休み", "会議"],
             width="small"
         ) for col in day_cols
     }
@@ -81,8 +72,8 @@ def solve_shift():
     model = cp_model.CpModel()
     all_days = range(1, num_days + 1)
     all_emps = range(len(emp_names))
-    OFF, DAY, N_START, N_END = 0, 1, 2, 3
-    STATES = [OFF, DAY, N_START, N_END]
+    OFF, DAY, N_START, N_END, MEETING = 0, 1, 2, 3, 4
+    STATES = [OFF, DAY, N_START, N_END, MEETING]
 
     shifts = {}
     for e in all_emps:
@@ -93,6 +84,8 @@ def solve_shift():
     for d in all_days:
         for e in all_emps:
             model.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
+        
+        # 人数制限（会議は含めない）
         model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) >= 3)
         model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) <= 5)
         model.Add(sum(shifts[(e, d, N_START)] for e in all_emps) == 2)
@@ -106,23 +99,25 @@ def solve_shift():
             if val == "夜勤入": model.Add(shifts[(e_idx, day_num, N_START)] == 1)
             if val == "夜勤明け": model.Add(shifts[(e_idx, day_num, N_END)] == 1)
             if val == "休み": model.Add(shifts[(e_idx, day_num, OFF)] == 1)
+            if val == "会議": model.Add(shifts[(e_idx, day_num, MEETING)] == 1)
 
     for e in all_emps:
         for d in range(1, num_days):
             model.Add(shifts[(e, d, N_START)] == shifts[(e, d+1, N_END)])
         for d in range(1, num_days - 4):
-            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(6)) >= 1) # 6連勤以上禁止
+            model.Add(sum(shifts[(e, d + i, OFF)] for i in range(6)) >= 1)
         
-        # --- 各スタッフの時間上限を設定 ---
-        hrs = [shifts[(e, d, DAY)]*8 + shifts[(e, d, N_START)]*6 + shifts[(e, d, N_END)]*8 for d in all_days]
+        # --- 時間計算（共通上限を適用） ---
+        hrs = [
+            shifts[(e, d, DAY)] * 8 + 
+            shifts[(e, d, N_START)] * 6 + 
+            shifts[(e, d, N_END)] * 8 + 
+            shifts[(e, d, MEETING)] * 8 
+            for d in all_days
+        ]
         
-        # スタッフごとに上限値を振り分ける
-        staff_max_h = max_h_common
-        if e == 0: staff_max_h = max_h_s01
-        elif e == 1: staff_max_h = max_h_s02
-        elif e == 7: staff_max_h = max_h_s08
-        
-        model.Add(sum(hrs) <= staff_max_h)
+        # 全員一律で共通設定を参照
+        model.Add(sum(hrs) <= max_h_common)
     
     model.Add(sum(shifts[(0, d, N_START)] for d in all_days) == s01_night_limit)
     for e in range(7, 12):
@@ -143,10 +138,11 @@ def solve_shift():
 
     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
         res_data = []
+        name_map = {DAY: "日勤", N_START: "夜勤入", N_END: "夜勤明", OFF: "休み", MEETING: "会議"}
         for e in all_emps:
             row = {"スタッフ": emp_names[e]}
             for d in all_days:
-                for s, name in {DAY:"日勤", N_START:"夜勤入", N_END:"夜勤明", OFF:"休み"}.items():
+                for s, name in name_map.items():
                     if solver.Value(shifts[(e, d, s)]): row[f"{d}"] = name
             res_data.append(row)
         return pd.DataFrame(res_data).set_index("スタッフ")
@@ -178,16 +174,13 @@ if st.button("🚀 シフトを作成する"):
             st.subheader("📊 最終集計（個人別）")
             counts = result_df.T.apply(pd.Series.value_counts).fillna(0).astype(int)
 
-            # --- 新機能：勤務時間合計の計算 ---
-            # 日勤=8h, 夜勤入=6h, 夜勤明=8h, 休み=0h として計算
-            hours_map = {"日勤": 8, "夜勤入": 6, "夜勤明": 8, "休み": 0}
+            # 勤務時間合計の計算
+            hours_map = {"日勤": 8, "夜勤入": 6, "夜勤明": 8, "休み": 0, "会議": 8}
             
             def calculate_hours(series):
                 return sum(series.map(lambda x: hours_map.get(x, 0)))
             
             total_hours = result_df.apply(calculate_hours, axis=1)
-            
-            # カウント表に「勤務時間合計」の行を追加
             counts.loc["勤務時間合計"] = total_hours
             
             st.table(counts)
