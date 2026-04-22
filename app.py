@@ -177,6 +177,19 @@ if st.button("🚀 シフトを作成する"):
             
             st.subheader("📊 最終集計（個人別）")
             counts = result_df.T.apply(pd.Series.value_counts).fillna(0).astype(int)
+
+            # --- 新機能：勤務時間合計の計算 ---
+            # 日勤=8h, 夜勤入=6h, 夜勤明=8h, 休み=0h として計算
+            hours_map = {"日勤": 8, "夜勤入": 6, "夜勤明": 8, "休み": 0}
+            
+            def calculate_hours(series):
+                return sum(series.map(lambda x: hours_map.get(x, 0)))
+            
+            total_hours = result_df.apply(calculate_hours, axis=1)
+            
+            # カウント表に「勤務時間合計」の行を追加
+            counts.loc["勤務時間合計"] = total_hours
+            
             st.table(counts)
         else:
             st.error("解が見つかりませんでした。")
