@@ -94,6 +94,7 @@ def solve_shift():
         for e in all_emps:
             model.Add(sum(shifts[(e, d, s)] for s in STATES) == 1)
         model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) >= 3)
+        model.Add(sum(shifts[(e, d, DAY)] for e in all_emps) <= 5)
         model.Add(sum(shifts[(e, d, N_START)] for e in all_emps) == 2)
         model.Add(sum(shifts[(e, d, N_END)] for e in all_emps) == 2)
 
